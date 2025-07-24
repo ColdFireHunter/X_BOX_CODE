@@ -63,10 +63,33 @@ void setup()
   pinMode(KEY_SWITCH_1, INPUT);
   pinMode(KEY_SWITCH_2, INPUT);
 
+  pinMode(FRONT_PANEL_BUTTON, INPUT_PULLUP);
+
   digitalWrite(EN_BOOST, LOW);
   digitalWrite(EN_OUTPUT, LOW);
 }
 
 void loop()
 {
+  static uint32_t lastButtonPress = 0;
+  if (digitalRead(FRONT_PANEL_BUTTON) == LOW)
+  {
+    uint32_t currentTime = millis();
+    if (currentTime - lastButtonPress > 200) // 200 ms debounce time
+    {
+      lastButtonPress = currentTime;
+      // Togle led matrix
+      static bool ledOn = false;
+      ledOn = !ledOn;
+      if (ledOn)
+      {
+        asyncLED.showChar8x8('X', 0, 255, 0, 0); // Show 'A' in red
+      }
+      else
+      {
+        asyncLED.clearRGBW(); // Clear the LED matrix
+      }
+      asyncLED.show(); // Update the LED matrix
+    }
+  }
 }
