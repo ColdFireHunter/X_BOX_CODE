@@ -72,11 +72,13 @@ private:
 
     bool debounced_dip_switch_1 = false; // Debounced state for DIP_SWITCH_1
     bool debounced_dip_switch_2 = false; // Debounced state for DIP_SWITCH
-    bool debounced_dip_switch_3 = false; // Debounced state for DIP_SWITCH_3
+    bool debounced_dip_switch_3 = false; // Debounced state for DIP_SWITCH_3^
+
+    bool motor_opto = false; // State for MOTOR_OPTO
 
     Neotimer adcTimer = Neotimer(ADC_CONVERT_TIME); // Timer for ADC conversion
-    Neotimer wisch1Timer = Neotimer(5000);          // Timer for Wisch 1
-    Neotimer wisch2Timer = Neotimer(5000);          // Timer for Wisch 2
+    Neotimer wisch1Timer = Neotimer(500);          // Timer for Wisch 1
+    Neotimer wisch2Timer = Neotimer(500);          // Timer for Wisch 2
 };
 
 #endif // GPIO_H
