@@ -12,9 +12,7 @@ AsyncLED asyncLED;
 // LED DMA1 CH1
 // ADC DMA1 CH7
 
-static constexpr float GAMMA = 2.0f;
 static uint32_t lastPotTimeout = 0;
-
 static bool ledsActive = false;
 static uint32_t cycleEndTime = 0;
 
@@ -180,26 +178,10 @@ void updateDoorState()
   case DoorState::BOOST_START:
   {
     uint32_t elapsed = boostTimer.getEllapsed();
-    uint8_t b;
 
-    /*
-    if (elapsed >= BOOST_STABILIZE_MS)
-    {
-      b = 255;
-    }
-    else
-    {
-      // normalized [0..1]
-      float f = (float)elapsed / (float)BOOST_STABILIZE_MS;
-      // apply gamma (f^GAMMA), you can tweak GAMMA up/down for different curves
-      float g = powf(f, GAMMA);
-      b = (uint8_t)(g * 255.0f);
-    }
-    */
     if (once == true)
     {
-      b = 255;
-      asyncLED.fillRGBW(b, b, b, b);
+      asyncLED.fillRGBW(255, 255, 255, 255);
       asyncLED.show();
       once = false;
     }
