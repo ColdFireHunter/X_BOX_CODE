@@ -40,9 +40,11 @@ public:
     bool getBatteryCharger1Status() const { return !digitalRead(BAT1_CHGR_STATUS); }                                 // Get status of BAT1_CHGR_STATUS pin
     bool getBatteryCharger2Status() const { return !digitalRead(BAT2_CHGR_STATUS); }                                 // Get status of BAT2_CHGR_STATUS pin
 
-    bool getDip1() const { return !digitalRead(DIP_SWITCH_1); } // Getter for DIP_SWITCH_1
-    bool getDip2() const { return !digitalRead(DIP_SWITCH_2); } // Getter for DIP_SWITCH_2
-    bool getDip3() const { return !digitalRead(DIP_SWITCH_3); } // Getter for DIP_SWITCH_3
+    bool getDip1() const { return debounced_dip_switch_1; } // Getter for DIP_SWITCH_1
+    bool getDip2() const { return debounced_dip_switch_2; } // Getter for DIP_SWITCH_2
+    bool getDip3() const { return debounced_dip_switch_3; } // Getter for DIP_SWITCH_3
+
+    bool getMotorOpto() const { return !digitalRead(MOTOR_OPTO); } // Getter for MOTOR_OPTO
 
     bool getFrontPanelButton() const { return debounced_front_panel_button; } // Getter for FRONT_PANEL_BUTTON
 
@@ -67,6 +69,10 @@ private:
     bool debounced_light_bar2 = false; // Debounced state for light bar 2
 
     bool debounced_front_panel_button = false; // Debounced state for front panel button
+
+    bool debounced_dip_switch_1 = false; // Debounced state for DIP_SWITCH_1
+    bool debounced_dip_switch_2 = false; // Debounced state for DIP_SWITCH
+    bool debounced_dip_switch_3 = false; // Debounced state for DIP_SWITCH_3
 
     Neotimer adcTimer = Neotimer(ADC_CONVERT_TIME); // Timer for ADC conversion
     Neotimer wisch1Timer = Neotimer(5000);          // Timer for Wisch 1

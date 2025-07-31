@@ -78,16 +78,14 @@ void gpio::handler()
     if (wisch1Timer.done())
     {
         digitalWrite(WISCH1_PIN, LOW); // Turn off Wisch 1 after the timer is done
-        DEBUG_SERIAL.println("Wisch 1 turned off");
-        wisch1Timer.reset(); // Reset the timer for Wisch 1
-        wisch1Timer.stop();  // Stop the timer for Wisch 1
+        wisch1Timer.reset();           // Reset the timer for Wisch 1
+        wisch1Timer.stop();            // Stop the timer for Wisch 1
     }
     if (wisch2Timer.done())
     {
         digitalWrite(WISCH2_PIN, LOW); // Turn off Wisch 2 after the timer is done
-        DEBUG_SERIAL.println("Wisch 2 turned off");
-        wisch2Timer.reset(); // Reset the timer for Wisch 2
-        wisch2Timer.stop();  // Stop the timer for Wisch 2
+        wisch2Timer.reset();           // Reset the timer for Wisch 2
+        wisch2Timer.stop();            // Stop the timer for Wisch 2
     }
 }
 
@@ -118,6 +116,11 @@ void gpio::debounceInputs()
 
     // Debounce front panel button
     debounced_front_panel_button = debounce(!digitalRead(FRONT_PANEL_BUTTON));
+
+    // Debounce DIP switches
+    debounced_dip_switch_1 = debounce(!digitalRead(DIP_SWITCH_1));
+    debounced_dip_switch_2 = debounce(!digitalRead(DIP_SWITCH_2));
+    debounced_dip_switch_3 = debounce(!digitalRead(DIP_SWITCH_3));
 }
 
 bool gpio::debounce(bool signal)
@@ -152,7 +155,6 @@ void gpio::triggerWisch1()
         wisch1Timer.reset();
         wisch1Timer.start();
         digitalWrite(WISCH1_PIN, HIGH);
-        DEBUG_SERIAL.println("Wisch 1 triggered");
     }
 }
 void gpio::triggerWisch2()
@@ -162,6 +164,5 @@ void gpio::triggerWisch2()
         wisch2Timer.reset();
         wisch2Timer.start();
         digitalWrite(WISCH2_PIN, HIGH);
-        DEBUG_SERIAL.println("Wisch 2 triggered");
     }
 }

@@ -7,9 +7,399 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 gpio GPIO;
+AsyncLED asyncLED;
 
 // LED DMA1 CH1
 // ADC DMA1 CH7
+
+static constexpr float GAMMA = 2.0f;
+static uint32_t lastPotTimeout = 0;
+
+static bool ledsActive = false;
+static uint32_t cycleEndTime = 0;
+
+static bool doorUp = false; // false = down, true = up
+static bool lastWisch1, lastWisch2, retried;
+
+static bool lastDip1State = false;
+
+bool once = false;
+
+// FSM states
+enum class DoorState
+{
+  IDLE,
+  BOOST_START,
+  WAIT_PG,
+  ENABLE_OUTPUT,
+  SEND_WISCH,
+  MOTOR_WAIT_RESPONSE,
+  MOTOR_WAIT_END,
+  FINISH_DELAY,
+  DISABLE_ALL
+};
+enum class ErrorReason
+{
+  NO_PG_SIGNAL,
+  MOTOR_NO_RESPONSE,
+  MOTOR_NO_END
+};
+
+// bit-flags for each possible trigger source
+enum InputSource : uint8_t
+{
+  SRC_NONE = 0,
+  SRC_KEY1 = 1 << 0,
+  SRC_RF1 = 1 << 1,
+  SRC_KEY2 = 1 << 2,
+  SRC_RF2 = 1 << 3,
+  SRC_FRONTBTN = 1 << 4,
+};
+
+static constexpr uint32_t BOOST_STABILIZE_MS = 2000;
+static constexpr uint32_t TECH_POWERUP_MS = 2000;
+static constexpr uint32_t MOTOR_TIMEOUT_MS = 5000;
+static constexpr uint32_t END_TIMEOUT_MS = 60000;
+static constexpr uint32_t FINISH_DELAY_MS = 5000;
+
+static Neotimer boostTimer(BOOST_STABILIZE_MS);
+static Neotimer techTimer(TECH_POWERUP_MS);
+static Neotimer motorTimer(MOTOR_TIMEOUT_MS);
+static Neotimer endTimeoutTimer(END_TIMEOUT_MS);
+static Neotimer finishTimer(FINISH_DELAY_MS);
+
+static DoorState state = DoorState::IDLE;
+
+void errorHandler(ErrorReason reason)
+{
+  DEBUG_SERIAL.print("Error: ");
+  switch (reason)
+  {
+  case ErrorReason::NO_PG_SIGNAL:
+    DEBUG_SERIAL.println("Boost-Good (PG) signal never detected");
+    break;
+  case ErrorReason::MOTOR_NO_RESPONSE:
+    DEBUG_SERIAL.println("Motor did not respond to Wisch pulse");
+    break;
+  case ErrorReason::MOTOR_NO_END:
+    DEBUG_SERIAL.println("Motor did not finish moving in time");
+    break;
+  }
+}
+
+bool pollRequest(bool &want1, bool &want2, uint8_t &sourceFlags)
+{
+  want1 = want2 = false;
+  sourceFlags = SRC_NONE;
+
+  if (GPIO.getKeySwitch1())
+  {
+    want1 = true;
+    sourceFlags |= SRC_KEY1;
+  }
+  if (GPIO.getRF_In1())
+  {
+    want1 = true;
+    sourceFlags |= SRC_RF1;
+  }
+  if (GPIO.getKeySwitch2())
+  {
+    want2 = true;
+    sourceFlags |= SRC_KEY2;
+  }
+  if (GPIO.getRF_In2())
+  {
+    want2 = true;
+    sourceFlags |= SRC_RF2;
+  }
+  if (GPIO.getFrontPanelButton())
+  {
+    want1 = true; // front panel only ever fires Wisch1
+    sourceFlags |= SRC_FRONTBTN;
+  }
+
+  return sourceFlags != SRC_NONE;
+}
+
+void updateDoorState()
+{
+  bool req1, req2;
+  uint8_t src;
+  bool hasReq = pollRequest(req1, req2, src);
+
+  switch (state)
+  {
+  case DoorState::IDLE:
+    if (hasReq)
+    {
+      DEBUG_SERIAL.print("Request from:");
+      if (src & SRC_KEY1)
+        DEBUG_SERIAL.print(" KEY1");
+      if (src & SRC_RF1)
+        DEBUG_SERIAL.print(" RF1");
+      if (src & SRC_KEY2)
+        DEBUG_SERIAL.print(" KEY2");
+      if (src & SRC_RF2)
+        DEBUG_SERIAL.print(" RF2");
+      if (src & SRC_FRONTBTN)
+        DEBUG_SERIAL.print(" FRONTBTN");
+      DEBUG_SERIAL.println();
+
+      // kick off fade-in to white over BOOST_STABILIZE_MS
+      asyncLED.fillRGBW(0, 0, 0, 0);
+      asyncLED.show();
+      ledsActive = true;
+      cycleEndTime = 0; // reset cycle end time
+
+      // NEW: DIP1 selects full behavior, else everything → Wisch1 only
+      if (GPIO.getDip1())
+      {
+        lastWisch1 = req1;
+        lastWisch2 = req2;
+      }
+      else
+      {
+        lastWisch1 = true;  // any request fires Wisch1
+        lastWisch2 = false; // never fire Wisch2
+      }
+
+      retried = false;
+      GPIO.setBoostEnable(true);
+      boostTimer.reset();
+      boostTimer.start();
+      state = DoorState::BOOST_START;
+
+      once = true;
+    }
+    break;
+
+  case DoorState::BOOST_START:
+  {
+    uint32_t elapsed = boostTimer.getEllapsed();
+    uint8_t b;
+
+    /*
+    if (elapsed >= BOOST_STABILIZE_MS)
+    {
+      b = 255;
+    }
+    else
+    {
+      // normalized [0..1]
+      float f = (float)elapsed / (float)BOOST_STABILIZE_MS;
+      // apply gamma (f^GAMMA), you can tweak GAMMA up/down for different curves
+      float g = powf(f, GAMMA);
+      b = (uint8_t)(g * 255.0f);
+    }
+    */
+    if (once == true)
+    {
+      b = 255;
+      asyncLED.fillRGBW(b, b, b, b);
+      asyncLED.show();
+      once = false;
+    }
+
+    if (elapsed >= BOOST_STABILIZE_MS)
+    {
+      DEBUG_SERIAL.println("BOOST stabilized → WAIT_PG");
+      state = DoorState::WAIT_PG;
+    }
+    break;
+  }
+
+  case DoorState::WAIT_PG:
+    if (GPIO.getBoostStatus())
+    {
+      DEBUG_SERIAL.println("PG high → ENABLE_OUTPUT");
+      GPIO.setOutputEnable(true);
+      techTimer.reset();
+      techTimer.start();
+      state = DoorState::ENABLE_OUTPUT;
+    }
+    break;
+
+  case DoorState::ENABLE_OUTPUT:
+    if (techTimer.done())
+    {
+      DEBUG_SERIAL.println("Control electronics powered → SEND_WISCH");
+      state = DoorState::SEND_WISCH;
+    }
+    break;
+
+  case DoorState::SEND_WISCH:
+    if (lastWisch1)
+    {
+      GPIO.triggerWisch1();
+      DEBUG_SERIAL.println("Fired Wisch 1");
+    }
+    if (lastWisch2)
+    {
+      GPIO.triggerWisch2();
+      DEBUG_SERIAL.println("Fired Wisch 2");
+    }
+    motorTimer.reset();
+    motorTimer.start();
+    state = DoorState::MOTOR_WAIT_RESPONSE;
+    break;
+
+  case DoorState::MOTOR_WAIT_RESPONSE:
+    if (GPIO.getMotorOpto())
+    {
+      DEBUG_SERIAL.println("Motor opto HIGH → movement detected");
+      doorUp = !doorUp;
+      DEBUG_SERIAL.print("Door now ");
+      DEBUG_SERIAL.println(doorUp ? "UP" : "DOWN");
+      endTimeoutTimer.reset();
+      endTimeoutTimer.start();
+      state = DoorState::MOTOR_WAIT_END;
+    }
+    else if (motorTimer.done())
+    {
+      if (!retried)
+      {
+        DEBUG_SERIAL.println("No response → RETRY Wisch once");
+        retried = true;
+        if (lastWisch1)
+        {
+          GPIO.triggerWisch1();
+          DEBUG_SERIAL.println("Retry Wisch 1");
+        }
+        if (lastWisch2)
+        {
+          GPIO.triggerWisch2();
+          DEBUG_SERIAL.println("Retry Wisch 2");
+        }
+        motorTimer.reset();
+        motorTimer.start();
+      }
+      else
+      {
+        DEBUG_SERIAL.println("Error: MOTOR_NO_RESPONSE");
+        finishTimer.reset();
+        finishTimer.start();
+        state = DoorState::FINISH_DELAY;
+      }
+    }
+    break;
+
+  case DoorState::MOTOR_WAIT_END:
+    // allow new requests mid-move (same as before)…
+    if (hasReq)
+    {
+      DEBUG_SERIAL.println("Queueing next stroke mid-move");
+      DEBUG_SERIAL.print("Request from:");
+      if (src & SRC_KEY1)
+        DEBUG_SERIAL.print(" KEY1");
+      if (src & SRC_RF1)
+        DEBUG_SERIAL.print(" RF1");
+      if (src & SRC_KEY2)
+        DEBUG_SERIAL.print(" KEY2");
+      if (src & SRC_RF2)
+        DEBUG_SERIAL.print(" RF2");
+      if (src & SRC_FRONTBTN)
+        DEBUG_SERIAL.print(" FRONTBTN");
+      DEBUG_SERIAL.println();
+
+      if (GPIO.getDip1())
+      {
+        lastWisch1 = req1;
+        lastWisch2 = req2;
+      }
+      else
+      {
+        lastWisch1 = true;
+        lastWisch2 = false;
+      }
+
+      retried = false;
+      state = DoorState::SEND_WISCH;
+      break;
+    }
+    if (!GPIO.getMotorOpto())
+    {
+      DEBUG_SERIAL.println("Motor ended → finish delay");
+      finishTimer.reset();
+      finishTimer.start();
+      // mark the cycle’s end for LED-disable timing
+      cycleEndTime = millis();
+      state = DoorState::FINISH_DELAY;
+    }
+    else if (endTimeoutTimer.done())
+    {
+      DEBUG_SERIAL.println("Error: MOTOR_NO_END");
+      state = DoorState::DISABLE_ALL;
+    }
+    break;
+
+  case DoorState::FINISH_DELAY:
+    if (finishTimer.done())
+    {
+      DEBUG_SERIAL.println("Finish delay over → DISABLE ALL");
+      state = DoorState::DISABLE_ALL;
+    }
+    break;
+
+  case DoorState::DISABLE_ALL:
+
+    if (ledsActive && cycleEndTime == 0)
+    {
+      cycleEndTime = millis();
+    }
+
+    GPIO.setOutputEnable(false);
+    GPIO.setBoostEnable(false);
+    DEBUG_SERIAL.println("OUTPUT & BOOST disabled → back to IDLE");
+    // make sure we capture end time if finishDelay was zero
+    cycleEndTime = cycleEndTime ?: millis();
+    state = DoorState::IDLE;
+    break;
+  }
+}
+
+void handleLEDDisable()
+{
+  // --- new: detect & print pot-timeout changes ---
+  uint32_t potTime = GPIO.getPotiTime();
+  if (potTime != lastPotTimeout)
+  {
+    lastPotTimeout = potTime;
+    DEBUG_SERIAL.print("Pot timeout set to ");
+    DEBUG_SERIAL.print(potTime);
+    DEBUG_SERIAL.println(" ms");
+  }
+
+  if (!ledsActive || cycleEndTime == 0)
+    return;
+
+  uint32_t elapsed = millis() - cycleEndTime;
+  uint32_t disableMs = GPIO.getPotiTime(); // dynamically updated
+  if (elapsed >= disableMs)
+  {
+    asyncLED.clearRGBW();
+    asyncLED.show();
+    ledsActive = false;
+    DEBUG_SERIAL.println("LEDs disabled after pot timeout");
+  }
+}
+
+void handleDip1Change()
+{
+  bool curr = GPIO.getDip1();
+  if (curr != lastDip1State)
+  {
+    lastDip1State = curr;
+    DEBUG_SERIAL.print("DIP1 changed → ");
+    if (curr)
+    {
+      DEBUG_SERIAL.println("Simultaneous mode ENABLED");
+    }
+    else
+    {
+      DEBUG_SERIAL.println("Independent mode ENABLED");
+    }
+  }
+}
 
 void SystemClock_Config(void)
 {
@@ -156,8 +546,6 @@ static void MX_DMA_Init(void)
   HAL_NVIC_EnableIRQ(DMA1_Ch4_7_DMAMUX1_OVR_IRQn);
 }
 
-AsyncLED asyncLED;
-
 void setup()
 {
   DEBUG_SERIAL.begin(115200);
@@ -181,6 +569,9 @@ void setup()
 void loop()
 {
   GPIO.handler();
+  updateDoorState(); // drive the door-opener FSM
+  handleLEDDisable();
+  handleDip1Change();
 }
 
 extern "C" void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc)
