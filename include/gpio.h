@@ -33,8 +33,8 @@ public:
     bool getLightBar1() const { return debounced_light_bar1; }                                   // Getter for LIGHT_BAR1
     bool getLightBar2() const { return debounced_light_bar2; }                                   // Getter for LIGHT_BAR2
 
-    void enableBatteryCharger1(bool state) { digitalWrite(BAT1_CHGR_ENABLE, state ? HIGH : LOW); }                   // Enable or disable battery charger 1
-    void enableBatteryCharger2(bool state) { digitalWrite(BAT2_CHGR_ENABLE, state ? HIGH : LOW); }                   // Enable or disable battery charger 2
+    void enableBatteryCharger1(bool state) { digitalWrite(BAT1_CHGR_ENABLE, state ? LOW : HIGH); }                   // Enable or disable battery charger 1
+    void enableBatteryCharger2(bool state) { digitalWrite(BAT2_CHGR_ENABLE, state ? LOW : HIGH); }                   // Enable or disable battery charger 2
     void setBatteryCharger1VoltageSwitch(bool state) { digitalWrite(BAT1_CHGR_VOLTAGE_SWITCH, state ? HIGH : LOW); } // Set BAT1_CHGR_VOLTAGE_SWITCH pin state
     void setBatteryCharger2VoltageSwitch(bool state) { digitalWrite(BAT2_CHGR_VOLTAGE_SWITCH, state ? HIGH : LOW); } // Set BAT2_CHGR_VOLTAGE_SWITCH pin state
     bool getBatteryCharger1Status() const { return !digitalRead(BAT1_CHGR_STATUS); }                                 // Get status of BAT1_CHGR_STATUS pin
