@@ -414,28 +414,32 @@ void handleDip1Change()
 // --- Battery & Solar Charging State Machine (integer millivolts) -------------
 // Event-driven debug only (minimal):
 //  - Logs only when chargers enable/disable and when battery health/absence changes.
-//  - No status change counters, no status-pin debug prints, no OCV start/stop prints.
-//  - Debounced status pins used silently for logic (0 = finished, 1 = active).
-//  - Strict solar “near-battery” enable rule: |Vsol - Vbat| <= 1000 mV AND Vsol >= Vbat + 300 mV.
-//  - Keep-enabled uses relaxed bounds with stop hysteresis.
-//  - Parallel charging allowed when solar >= 30V, still subject to “near-battery” rule.
+//  - Debounced charger-status used silently (0 = finished, 1 = active). No status prints/counters.
+//  - Enable rule (updated): Vsol must be at least Battery + 50 mV (no upper limit).
+//  - Keep-enabled rule (updated): keep only while Vsol >= Battery - 100 mV.
+//  - Extra safety: if solar voltage drops fast, disable chargers immediately.
+//  - Parallel charging allowed when solar >= 30V (still must satisfy each charger’s enable rule).
 //  - OCV health check: every 30s disable chargers for 5s to classify ABSENT / LOW / CRITICAL.
 //  - Termination logic: if a charger reports finished (0), keep it enabled; allow the other too.
 
-// ---- Configuration constants ----
 static constexpr uint32_t SAMPLE_INTERVAL_MS = 50;
 static constexpr uint32_t DECISION_INTERVAL_MS = 500;
 static constexpr uint8_t AVG_WINDOW_SAMPLES = DECISION_INTERVAL_MS / SAMPLE_INTERVAL_MS; // 10
 static_assert(AVG_WINDOW_SAMPLES >= 2, "AVG_WINDOW_SAMPLES must be >= 2");
 
 static constexpr int32_t BAT_PRESENT_MIN_MV = 1000; // >= 1.0 V means present
-static constexpr int32_t START_HYS_MV = 300;        // enable requires Vsol >= Vbat + 0.30 V (plus near-window)
-static constexpr int32_t STOP_HYS_MV = 100;         // disable when Vsol < Vbat - 0.10 V (and/or outside near-window)
-static constexpr int32_t SWITCH_DELTA_MV = 50;      // priority switch deadband
-static constexpr int32_t PARALLEL_SOLAR_MV = 30000; // 30.0 V threshold for allowing second charger
-static constexpr int32_t NEAR_WINDOW_MV = 1000;     // require |Vsol - Vbat| <= 1.0 V to ENABLE
 
-// Debounce configuration for charger status
+// Hysteresis thresholds (UPDATED per request)
+static constexpr int32_t START_HYS_MV = 50; // enable if Vsol >= Vbat + 0.05 V
+static constexpr int32_t STOP_HYS_MV = 100; // disable if Vsol <  Vbat - 0.10 V
+
+static constexpr int32_t SWITCH_DELTA_MV = 50;      // priority switch deadband
+static constexpr int32_t PARALLEL_SOLAR_MV = 30000; // 30.0 V threshold to allow second charger
+
+// Fast solar drop protection
+static constexpr int32_t SOLAR_FAST_DROP_MV = 1500; // if Vsol drops by ≥1.5 V between decisions → disable
+
+// Debounce for charger status pins
 static constexpr uint8_t STATUS_STABLE_CYCLES = 5; // require 5 decision ticks stable
 
 // Battery health thresholds (24V SLA pack, open-circuit; approx)
@@ -443,7 +447,7 @@ static constexpr int32_t BAT_LOW_THRESH_MV = 23600;  // ~20% SoC
 static constexpr int32_t BAT_CRIT_THRESH_MV = 22000; // critical cutoff
 static constexpr int32_t RISING_EPS_MV = 30;         // rising detection eps during OCV window
 
-// Open-circuit measurement scheduling
+// OCV measurement scheduling
 static constexpr uint32_t MEASURE_PERIOD_MS = 30000; // every 30s
 static constexpr uint32_t MEASURE_WINDOW_MS = 5000;  // disable for 5s
 
@@ -536,6 +540,9 @@ static bool measureActive = false;
 static uint32_t measureActiveStartMs = 0;
 static int32_t lastOCVB1mV = 0, lastOCVB2mV = 0;
 
+// Track last solar (decision-averaged) for fast-drop detection
+static int32_t lastDecisionVsol = 0;
+
 // --- GPIO wrappers ---
 static void setCharger1(bool on)
 {
@@ -575,21 +582,17 @@ static void setCharger2(bool on)
   }
 }
 
-// --- Hysteresis helpers with “near-battery” rule ---
-static inline bool nearBatteryWindow(int32_t vSol, int32_t vBat)
-{
-  return (vSol >= vBat - NEAR_WINDOW_MV) && (vSol <= vBat + NEAR_WINDOW_MV);
-}
-
+// --- Solar rules (UPDATED) ---
+// Enable only if Vsol >= Vbat + 50 mV (no upper bound).
 static bool solarAllowsEnable(int32_t vSol, int32_t vBat, HysLatch &hys)
 {
   if (hys.mayEnable)
   {
-    return nearBatteryWindow(vSol, vBat) && (vSol >= vBat + START_HYS_MV);
+    return (vSol >= (vBat + START_HYS_MV));
   }
   else
   {
-    if (nearBatteryWindow(vSol, vBat) && (vSol >= vBat + START_HYS_MV))
+    if (vSol >= (vBat + START_HYS_MV))
     {
       hys.mayEnable = true; // re-arm silently
     }
@@ -597,12 +600,10 @@ static bool solarAllowsEnable(int32_t vSol, int32_t vBat, HysLatch &hys)
   }
 }
 
+// Keep enabled only while Vsol >= Vbat - 100 mV.
 static bool solarKeepEnabled(int32_t vSol, int32_t vBat)
 {
-  const bool aboveStop = (vSol >= (vBat - STOP_HYS_MV));
-  const bool withinSlack = (vSol >= vBat - (NEAR_WINDOW_MV + STOP_HYS_MV)) &&
-                           (vSol <= vBat + (NEAR_WINDOW_MV + STOP_HYS_MV));
-  return aboveStop && withinSlack;
+  return (vSol >= (vBat - STOP_HYS_MV));
 }
 
 static bool batteryPresent(int32_t vBat) { return vBat >= BAT_PRESENT_MIN_MV; }
@@ -629,7 +630,7 @@ static bool debounceStatus(StatusDebounce &db, uint8_t raw)
   return false;
 }
 
-// --- Status management (silent; no counters, no prints) ---
+// --- Status management (silent; no prints) ---
 static void updateStatusPinsSilent()
 {
   const uint8_t s1raw = GPIO.getBatteryCharger1Status();
@@ -751,6 +752,23 @@ void updateBatterySolarCharger()
   const int32_t vB1 = avgB1.avg();
   const int32_t vB2 = avgB2.avg();
   const int32_t vSol = avgSol.avg();
+
+  // Fast drop protection (compare to previous decision tick)
+  if (lastDecisionVsol != 0)
+  {
+    const int32_t drop = lastDecisionVsol - vSol;
+    if (drop >= SOLAR_FAST_DROP_MV)
+    {
+      // Immediate safety shutdown
+      if (ch1Enabled || ch2Enabled)
+      {
+        DEBUG_SERIAL.println("[SYS] Solar fast drop → disable all");
+        setCharger1(false);
+        setCharger2(false);
+      }
+    }
+  }
+  lastDecisionVsol = vSol;
 
   const bool b1PresentNow = batteryPresent(vB1);
   const bool b2PresentNow = batteryPresent(vB2);
@@ -880,6 +898,7 @@ void updateBatterySolarCharger()
       }
       else
       {
+        // Normal parallel rule: require ≥30V AND satisfy own enable/keep rules
         if (ch2Enabled)
         {
           if (!(vSol >= PARALLEL_SOLAR_MV && keep2()))
