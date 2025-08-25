@@ -44,7 +44,7 @@ public:
     bool getDip2() const { return debounced_dip_switch_2; } // Getter for DIP_SWITCH_2
     bool getDip3() const { return debounced_dip_switch_3; } // Getter for DIP_SWITCH_3
 
-    bool getMotorOpto() const { return !digitalRead(MOTOR_OPTO); } // Getter for MOTOR_OPTO
+    int getMotorDirection(); // Getter for Motor Direction
 
     bool getFrontPanelButton() const { return debounced_front_panel_button; } // Getter for FRONT_PANEL_BUTTON
 
@@ -77,8 +77,8 @@ private:
     bool motor_opto = false; // State for MOTOR_OPTO
 
     Neotimer adcTimer = Neotimer(ADC_CONVERT_TIME); // Timer for ADC conversion
-    Neotimer wisch1Timer = Neotimer(500);          // Timer for Wisch 1
-    Neotimer wisch2Timer = Neotimer(500);          // Timer for Wisch 2
+    Neotimer wisch1Timer = Neotimer(500);           // Timer for Wisch 1
+    Neotimer wisch2Timer = Neotimer(500);           // Timer for Wisch 2
 };
 
 #endif // GPIO_H

@@ -45,7 +45,10 @@ void gpio::init()
     pinMode(WISCH1_PIN, OUTPUT);
     pinMode(WISCH2_PIN, OUTPUT);
 
-    pinMode(MOTOR_OPTO, INPUT_PULLUP);
+    pinMode(MOTOR_OPTO_1, INPUT);
+    pinMode(MOTOR_OPTO_2, INPUT);
+
+    pinMode(EXPANSION_GPIO, INPUT);
 
     digitalWrite(EN_BOOST, LOW);
     digitalWrite(EN_OUTPUT, LOW);
@@ -95,7 +98,7 @@ void gpio::convertADCValues()
     solar_voltage = __HAL_ADC_CALC_DATA_TO_VOLTAGE(vref_int_voltage, adc_values[1], ADC_RESOLUTION_12B) * 17.54385964912281;    // Convert to voltage
     battery1_voltage = __HAL_ADC_CALC_DATA_TO_VOLTAGE(vref_int_voltage, adc_values[2], ADC_RESOLUTION_12B) * 17.54385964912281; // Convert to voltage
     battery2_voltage = __HAL_ADC_CALC_DATA_TO_VOLTAGE(vref_int_voltage, adc_values[3], ADC_RESOLUTION_12B) * 17.54385964912281; // Convert to voltage
-    output_current = __HAL_ADC_CALC_DATA_TO_VOLTAGE(vref_int_voltage, adc_values[4], ADC_RESOLUTION_12B);                       // Convert to voltage
+    output_current = __HAL_ADC_CALC_DATA_TO_VOLTAGE(vref_int_voltage, adc_values[4], ADC_RESOLUTION_12B);                       // Convert to current
     int poti_time_temp = map(adc_values[0], 0, 4095, 180000, 5000);                                                             // Map the potentiometer value to a time range
     // only update if the value has changed by at least 1000 ms
     if (abs(poti_time_temp - poti_time) >= 1000)
@@ -165,4 +168,21 @@ void gpio::triggerWisch2()
         wisch2Timer.start();
         digitalWrite(WISCH2_PIN, HIGH);
     }
+}
+
+int gpio::getMotorDirection()
+{
+    if (digitalRead(MOTOR_OPTO_1) == HIGH && digitalRead(MOTOR_OPTO_2) == HIGH)
+    {
+        return 0; // Both sensors are HIGH, motor is stopped
+    }
+    else if (digitalRead(MOTOR_OPTO_1) == LOW)
+    {
+        return 1; // Motor is moving forward
+    }
+    else if (digitalRead(MOTOR_OPTO_2) == LOW)
+    {
+        return 2; // Motor is moving backward
+    }
+    return 0; // Default case
 }

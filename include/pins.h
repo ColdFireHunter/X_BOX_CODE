@@ -47,7 +47,8 @@
 // MOTOR CONTROL
 #define WISCH1_PIN PB6
 #define WISCH2_PIN PB7
-#define MOTOR_OPTO PC15
+#define MOTOR_OPTO_1 PA12
+#define MOTOR_OPTO_2 PA11
 
 // KEY SWICHES
 #define KEY_SWITCH_1 PC13
@@ -55,11 +56,12 @@
 
 // DEBUG
 #define DEBUG_LED PA15
-#define DEBUG_TX PA9_R
-#define DEBUG_RX PA10_R
+#define DEBUG_TX PA9
+#define DEBUG_RX PA10
 
 // EXPANSION PORT
 #define EXPANSION_TX PB10
 #define EXPANSION_RX PB11
+#define EXPANSION_GPIO PC15
 
 #endif // _pins_h
