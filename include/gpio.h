@@ -48,6 +48,8 @@ public:
 
     bool getFrontPanelButton() const { return debounced_front_panel_button; } // Getter for FRONT_PANEL_BUTTON
 
+    bool getMotorOpto() const { return digitalRead(MOTOR_OPTO_1) == LOW || digitalRead(MOTOR_OPTO_2) == LOW; } // Getter for MOTOR_OPTO
+
     void triggerWisch1();
     void triggerWisch2();
 

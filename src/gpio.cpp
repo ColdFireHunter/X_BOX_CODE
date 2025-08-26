@@ -178,11 +178,11 @@ int gpio::getMotorDirection()
     }
     else if (digitalRead(MOTOR_OPTO_1) == LOW)
     {
-        return 1; // Motor is moving forward
+        return 1; // Motor is moving downwards
     }
     else if (digitalRead(MOTOR_OPTO_2) == LOW)
     {
-        return 2; // Motor is moving backward
+        return 2; // Motor is moving upwards
     }
     return 0; // Default case
 }

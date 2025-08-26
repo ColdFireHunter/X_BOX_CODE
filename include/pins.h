@@ -41,8 +41,8 @@
 #define DIP_SWITCH_3 PB5
 
 // RF INPUT
-#define RF_IN1 PB8
-#define RF_IN2 PB9
+#define RF_IN1 PB9
+#define RF_IN2 PB8
 
 // MOTOR CONTROL
 #define WISCH1_PIN PB6
